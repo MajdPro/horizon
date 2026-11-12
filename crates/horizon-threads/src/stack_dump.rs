@@ -183,8 +183,9 @@ mod tests {
     /// (it resumes from the return address), while every caller's frame stays.
     #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
     #[inline(never)]
-    fn busy_in_a_named_frame(stop: &AtomicBool) {
+    fn busy_in_a_named_frame(started: &AtomicBool, stop: &AtomicBool) {
         let mut n = 0u64;
+        started.store(true, Ordering::Release);
         while !stop.load(Ordering::Relaxed) {
             n = std::hint::black_box(spin)(n);
         }
@@ -193,16 +194,21 @@ mod tests {
     #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
     #[test]
     fn reads_the_stack_of_a_busy_thread_from_another() {
+        let started = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
         let worker = {
-            let stop = stop.clone();
+            let (started, stop) = (started.clone(), stop.clone());
             std::thread::spawn(move || {
                 tx.send(Watched::current()).unwrap();
-                busy_in_a_named_frame(&stop);
+                busy_in_a_named_frame(&started, &stop);
             })
         };
         let watched = rx.recv().unwrap();
+        // The send can still be waking the receiver when it returns: sample only once the loop runs.
+        while !started.load(Ordering::Acquire) {
+            std::hint::spin_loop();
+        }
         let stack = watched.stack(Duration::from_secs(10));
         stop.store(true, Ordering::Relaxed);
         worker.join().unwrap();
