@@ -20,6 +20,7 @@
 pub mod hud;
 pub mod lang;
 pub mod pages;
+pub mod perf;
 pub mod players;
 mod registry;
 pub mod settings;
@@ -97,6 +98,11 @@ pub trait Hooks: Sync {
     /// The window's world stopped being open to LAN: Open to LAN's stop, or the player left the
     /// world. Called at that moment, by the window's own player only.
     fn lan_closed(&self) {}
+
+    /// Opens and shares saved performance captures ([`perf`]); the first hook that offers one is used.
+    fn captures(&self) -> Option<&dyn perf::Captures> {
+        None
+    }
 
     /// A game window opened: once, before the first frame, for every run that has a window,
     /// automated ones included ([`Client::automated`]); never for a dedicated server.
@@ -373,6 +379,11 @@ pub mod engine {
         for hooks in all() {
             hooks.tick(models);
         }
+    }
+
+    /// [`Hooks::captures`]: the first registered hook's.
+    pub fn captures() -> Option<&'static dyn perf::Captures> {
+        all().iter().find_map(|hooks| hooks.captures())
     }
 
     /// [`Hooks::tunnel`]: the first registered hook's resolver.
